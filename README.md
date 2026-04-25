@@ -10,12 +10,11 @@ NestJS Backend for WhatsApp-like Chat Application with Google Sheets storage.
 
 ## Prerequisites
 - Node.js v22+
-- Redis (running on localhost:6379)
 
 ## Installation
 
 ```bash
-cd /mnt/d/Projects/NestJS/api-mvchat
+cd /mnt/d/Projects/Nestjs/api-mvchat
 npm install
 ```
 
@@ -24,14 +23,15 @@ npm install
 Create `.env` file in project root:
 
 ```env
-PORT=3000
+PORT=3001
 JWT_SECRET=mvchat-secret-key-change-in-production
 JWT_EXPIRES_IN=7d
 GOOGLE_SPREADSHEET_ID=10bLHBJ0rWQyaDv2uVwYmNVNxcBHX2tZw3B01RSkXrxc
-REDIS_URL=redis://localhost:6379
 CLIENT_URL=http://localhost:3001
 GOOGLE_SERVICE_ACCOUNT_KEY={"type": "service_account","project_id": "xxx",...}
 ```
+
+Note: Server runs on port 3001 (not 3000) to avoid conflicts.
 
 ## Google Sheets Setup
 
@@ -66,12 +66,15 @@ Your spreadsheet must have these sheets:
 | Column | Header |
 |--------|--------|
 | A | id |
-| B | conversation_id |
-| C | sender_id |
-| D | content |
-| E | type |
-| F | createdAt |
-| G | read_at |
+| B | conversationId |
+| C | senderId |
+| D | senderName |
+| E | content |
+| F | type |
+| G | createdAt |
+| H | readAt |
+
+**Important:** The Messages sheet was updated to include senderName in column D.
 
 ## Run
 
@@ -84,7 +87,7 @@ npm run build
 npm run start:prod
 ```
 
-Server runs on http://localhost:3000
+Server runs on http://localhost:3001
 
 ## API Endpoints
 
@@ -109,8 +112,27 @@ Server runs on http://localhost:3000
 ### Messages
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | /messages/conversation/:conversationId | Get messages |
-| POST | /messages | Create message |
+| GET | /messages/conversation/:conversationId | Get messages by conversation |
+| POST | /messages/upsert | Insert or update message (idempotent) |
+
+## Message Flow Architecture
+
+This backend uses a unique message flow to prevent duplicates:
+
+### Send Message Flow
+```
+1. Flutter sends message via WebSocket
+2. Backend broadcasts to all clients in room (real-time, NO persistence)
+3. Each client receives WebSocket message
+4. Client calls POST /messages/upsert to save to Google Sheets
+5. On receive: if message ID exists, UPDATE; if not, INSERT
+```
+
+### Why This Architecture?
+- Prevents duplicate messages in Google Sheets
+- Real-time delivery via WebSocket
+- Persisted via upsert on client side
+- Works across multiple devices
 
 ## WebSocket Events
 
@@ -118,60 +140,57 @@ Server runs on http://localhost:3000
 ```javascript
 import { io } from 'socket.io-client';
 
-const socket = io('http://localhost:3000', {
+const socket = io('http://localhost:3001', {
   extraHeaders: {
     'Authorization': 'Bearer <JWT_TOKEN>'
   }
 });
 ```
 
-### Events
+### Client Events
 | Event | Payload | Description |
 |-------|---------|-------------|
 | join | { conversationId, userId } | Join room |
 | leave | { conversationId, userId } | Leave room |
-| message | { conversationId, senderId, senderName, content, type } | Send message |
+| message | { conversationId, senderId, senderName, content, type } | Send message (broadcast only, not persisted) |
 | typing | { conversationId, userId, userName } | User typing |
 | read | { messageId } | Mark as read |
 
-### Received Events
+### Server Events (Received)
 | Event | Data | Description |
 |-------|------|-------------|
-| newMessage | Message object | New message |
+| newMessage | Message object with senderName | New message received |
 | userTyping | { userId, userName } | User is typing |
 
 ## Example Usage
 
 ### Register User
 ```bash
-curl -X POST http://localhost:3000/auth/register \
+curl -X POST http://localhost:3001/auth/register \
   -H "Content-Type: application/json" \
   -d '{"username":"john","email":"john@example.com","password":"123456"}'
 ```
 
 ### Login
 ```bash
-curl -X POST http://localhost:3000/auth/login \
+curl -X POST http://localhost:3001/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"john@example.com","password":"123456"}'
 ```
 
 ### Create Direct Conversation
 ```bash
-curl -X GET http://localhost:3000/conversations/direct/user1_id/user2_id \
+curl -X GET http://localhost:3001/conversations/direct/user1_id/user2_id \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+### Get Messages
+```bash
+curl -X GET http://localhost:3001/messages/conversation/conv_xxx \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
 ## Troubleshooting
-
-### Redis not running
-```bash
-# Check Redis
-podman ps | grep redis
-
-# Start Redis
-podman run -d --name redis -p 6379:6379 redis:alpine
-```
 
 ### Google Sheets error
 1. Verify service account has access to spreadsheet
@@ -180,12 +199,17 @@ podman run -d --name redis -p 6379:6379 redis:alpine
 
 ### Port already in use
 ```bash
-# Find process using port 3000
-lsof -i :3000
+# Find process using port 3001
+netstat -tlnp | grep 3001
 
 # Change port in .env
-PORT=3001
+PORT=3002
 ```
+
+### Messages not showing
+- Check Messages sheet has correct headers (8 columns including senderName)
+- Verify column D header is "senderName"
+- Check console for error logs
 
 ## Project Structure
 
