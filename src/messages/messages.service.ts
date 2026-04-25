@@ -1,0 +1,118 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { GoogleSheetsService } from '../config';
+import { Message } from '../common/interfaces';
+
+@Injectable()
+export class MessagesService {
+  private readonly logger = new Logger(MessagesService.name);
+  private readonly SHEET_NAME = 'Messages';
+  private messages: Map<string, Message[]> = new Map();
+
+  constructor(private googleSheets: GoogleSheetsService) {
+    this.loadFromSheet();
+  }
+
+  private async loadFromSheet() {
+    const data = await this.googleSheets.getValues(this.SHEET_NAME);
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (row.length >= 7) {
+        const message: Message = {
+          id: row[0],
+          conversationId: row[1],
+          senderId: row[2],
+          senderName: row[3] || 'Unknown Sender',
+          content: row[4],
+          type: row[5] as 'text' | 'image',
+          createdAt: row[6],
+          readAt: row[7] || undefined,
+        };
+        if (!this.messages.has(message.conversationId)) {
+          this.messages.set(message.conversationId, []);
+        }
+        this.messages.get(message.conversationId)!.push(message);
+      }
+    }
+    this.logger.log(`Loaded ${this.messages.size} conversations with messages`);
+  }
+
+  async findByConversation(conversationId: string): Promise<Message[]> {
+    const data = this.messages.get(conversationId);
+    console.log(`Finding messages for conversation ${conversationId}:`, data);
+    return data || [];
+  }
+
+  async create(conversationId: string, senderId: string, content: string, type: 'text' | 'image' = 'text'): Promise<Message> {
+    const id = this.generateId();
+    const createdAt = new Date().toISOString();
+    const senderName = 'Unknown Sender';
+
+    const message: Message = { id, conversationId, senderId, senderName, content, type, createdAt };
+
+    if (!this.messages.has(conversationId)) {
+      this.messages.set(conversationId, []);
+    }
+    this.messages.get(conversationId)!.push(message);
+
+    await this.googleSheets.appendValues(`${this.SHEET_NAME}!A${(await this.getNextRow())}:H`, [[id, conversationId, senderId, senderName, content, type, createdAt, '']]);
+
+    this.logger.log(`Message created: ${id}`);
+    return message;
+  }
+
+  async markAsRead(messageId: string): Promise<void> {
+    for (const [convId, messages] of this.messages.entries()) {
+      const msg = messages.find(m => m.id === messageId);
+      if (msg) {
+        msg.readAt = new Date().toISOString();
+        break;
+      }
+    }
+  }
+
+  async upsertMessage(message: Message): Promise<Message> {
+    console.log('Upserting message:', message);
+    for (const [convId, messages] of this.messages.entries()) {
+      const existingIndex = messages.findIndex(m => m.id === message.id);
+      if (existingIndex !== -1) {
+        messages[existingIndex] = message;
+        await this.updateRow(message);
+        this.logger.log(`Message updated: ${message.id}`);
+        return message;
+      }
+    }
+    if (!this.messages.has(message.conversationId)) {
+      this.messages.set(message.conversationId, []);
+    }
+    this.messages.get(message.conversationId)!.push(message);
+    await this.googleSheets.appendValues(
+      `${this.SHEET_NAME}!A${(await this.getNextRow())}:H`,
+      [[message.id, message.conversationId, message.senderId, message.senderName || 'Unknown Sender', message.content, message.type, message.createdAt, message.readAt || '']]
+    );
+    this.logger.log(`Message upserted: ${message.id}`);
+    return message;
+  }
+
+  private async updateRow(message: Message): Promise<void> {
+    const data = await this.googleSheets.getValues(this.SHEET_NAME);
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === message.id) {
+        const row = i + 1;
+        await this.googleSheets.updateValues(
+          `${this.SHEET_NAME}!A${row}:H`,
+          [[message.id, message.conversationId, message.senderId, message.senderName || 'Unknown Sender', message.content, message.type, message.createdAt, message.readAt || '']]
+        );
+        return;
+      }
+    }
+  }
+
+  private generateId(): string {
+    return 'msg_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+  }
+
+  private async getNextRow(): Promise<number> {
+    const data = await this.googleSheets.getValues(this.SHEET_NAME);
+    return data.length + 1;
+  }
+}
