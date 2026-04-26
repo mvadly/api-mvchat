@@ -16,8 +16,7 @@ export class LoggingInterceptor implements NestInterceptor {
     const statusCode = response.statusCode;
 
     // Log Request
-    this.logger.log(`==> REQUEST ${method} ${url}`);
-    this.logger.log(`    Body: ${JSON.stringify(this.sanitizeBody(body))}`);
+    this.logger.log(`${method} ${url} Request Body: ${JSON.stringify(this.sanitizeBody(body))}`);
     if (query && Object.keys(query).length > 0) {
       this.logger.log(`    Query: ${JSON.stringify(query)}`);
     }
@@ -27,11 +26,10 @@ export class LoggingInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap({
         next: (data) => {
-          this.logger.log(`<== RESPONSE ${method} ${url} ${statusCode} (${Date.now() - now}ms)`);
-          this.logger.log(`    Body: ${JSON.stringify(data)}`);
+          this.logger.log(`Response Body: [${statusCode}] ${JSON.stringify(data).substring(0, 20)} (${Date.now() - now}ms)`);
         },
         error: (error) => {
-          this.logger.error(`<== ERROR ${method} ${url} ${statusCode} (${Date.now() - now}ms)`);
+          this.logger.error(`<== ERROR ${method} ${url} [${statusCode}] (${Date.now() - now}ms)`);
           this.logger.error(`    Error: ${error.message}`);
         },
       }),
