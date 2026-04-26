@@ -8,6 +8,8 @@ export class GoogleSheetsService {
   private readonly logger = new Logger(GoogleSheetsService.name);
   private sheets: any;
   private spreadsheetId: string;
+  private cache = new Map<string, { data: any[][]; timestamp: number }>();
+  private readonly CACHE_TTL = 60000; // 60 seconds cache
 
   constructor(private configService: ConfigService) {
     this.initialize();
@@ -33,6 +35,16 @@ export class GoogleSheetsService {
   }
 
   async getValues(range: string): Promise<any[][]> {
+    // Extract sheet name from range (e.g., "Conversations!A1:H" → "Conversations")
+    const sheetName = range.split('!')[0];
+    const now = Date.now();
+    
+    // Check cache first
+    const cached = this.cache.get(sheetName);
+    if (cached && (now - cached.timestamp) < this.CACHE_TTL) {
+      return cached.data;
+    }
+    
     if (!this.sheets) {
       this.logger.warn('Sheets not initialized');
       return [];
@@ -42,9 +54,20 @@ export class GoogleSheetsService {
         spreadsheetId: this.spreadsheetId,
         range,
       });
-      return response.data.values || [];
+      const data = response.data.values || [];
+      
+      // Cache the data
+      this.cache.set(sheetName, { data, timestamp: now });
+      this.logger.log(`Fetched ${data.length} rows from ${sheetName} (cache ${cached ? 'miss' : 'hit'})`);
+      
+      return data;
     } catch (error) {
       this.logger.error(`Error getting values from ${range}:`, error);
+      // Return cached data if available, even if expired
+      if (cached) {
+        this.logger.warn(`Returning expired cache for ${sheetName}`);
+        return cached.data;
+      }
       return [];
     }
   }
@@ -69,10 +92,15 @@ export class GoogleSheetsService {
   }
 
   async appendValues(range: string, values: any[][]): Promise<boolean> {
+    // Invalidate cache on write
+    const sheetName = range.split('!')[0];
+    this.cache.delete(sheetName);
+    
     if (!this.sheets) {
       this.logger.warn('Sheets not initialized');
       return false;
     }
+    this.logger.log(`Appending to range: ${range}, values: ${JSON.stringify(values)}`);
     try {
       await this.sheets.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,
@@ -88,10 +116,16 @@ export class GoogleSheetsService {
   }
 
   async updateValues(range: string, values: any[][]): Promise<boolean> {
+    // Invalidate cache on write
+    const sheetName = range.split('!')[0];
+    this.cache.delete(sheetName);
+    
     if (!this.sheets) {
       this.logger.warn('Sheets not initialized');
       return false;
     }
+    
+    this.logger.log(`Updating range: ${range}, values: ${JSON.stringify(values)}`);
     try {
       await this.sheets.spreadsheets.values.update({
         spreadsheetId: this.spreadsheetId,

@@ -7,7 +7,7 @@ import { ConversationsService } from '../conversations/conversations.service';
 @Injectable()
 export class MessagesService {
   private readonly logger = new Logger(MessagesService.name);
-  private readonly SHEET_NAME = 'Messages';
+  private readonly MESSAGES_SHEET = 'Messages';
   private messages: Map<string, Message[]> = new Map();
 
   constructor(
@@ -18,7 +18,7 @@ export class MessagesService {
   }
 
   private async loadFromSheet() {
-    const data = await this.googleSheets.getValues(this.SHEET_NAME);
+    const data = await this.googleSheets.getValues(this.MESSAGES_SHEET);
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       if (row.length >= 7) {
@@ -57,7 +57,7 @@ export class MessagesService {
     }
     this.messages.get(conversationId)!.push(message);
 
-    await this.googleSheets.appendValues(`${this.SHEET_NAME}!A${(await this.getNextRow())}:H`, [[id, conversationId, senderId, senderName, content, type, createdAt, '']]);
+    await this.googleSheets.appendValues(`${this.MESSAGES_SHEET}!A${(await this.getNextRow())}:H`, [[id, conversationId, senderId, senderName, content, type, createdAt, '']]);
 
     // Update conversation last message
     await this.conversationsService.updateLastMessage(
@@ -127,7 +127,7 @@ export class MessagesService {
     }
     this.messages.get(message.conversationId)!.push(message);
     await this.googleSheets.appendValues(
-      `${this.SHEET_NAME}!A${(await this.getNextRow())}:H`,
+      `${this.MESSAGES_SHEET}!A${(await this.getNextRow())}:H`,
       [[message.id, message.conversationId, message.senderId, message.senderName || 'Unknown Sender', message.content, message.type, message.createdAt, message.readAt || '']]
     );
     this.logger.log(`Message upserted: ${message.id}`);
@@ -170,12 +170,12 @@ export class MessagesService {
   }
 
   private async updateRow(message: Message): Promise<void> {
-    const data = await this.googleSheets.getValues(this.SHEET_NAME);
+    const data = await this.googleSheets.getValues(this.MESSAGES_SHEET);
     for (let i = 1; i < data.length; i++) {
       if (data[i][0] === message.id) {
         const row = i + 1;
         await this.googleSheets.updateValues(
-          `${this.SHEET_NAME}!A${row}:H`,
+          `${this.MESSAGES_SHEET}!A${row}:H`,
           [[message.id, message.conversationId, message.senderId, message.senderName || 'Unknown Sender', message.content, message.type, message.createdAt, message.readAt || '']]
         );
         return;
@@ -188,7 +188,7 @@ export class MessagesService {
   }
 
   private async getNextRow(): Promise<number> {
-    const data = await this.googleSheets.getValues(this.SHEET_NAME);
+    const data = await this.googleSheets.getValues(this.MESSAGES_SHEET);
     return data.length + 1;
   }
 }

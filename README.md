@@ -35,6 +35,9 @@ PUSHER_APP_ID=1403689
 PUSHER_KEY=67678fab751961ef6d68
 PUSHER_SECRET=dd87d1976ef3266e7cd2
 PUSHER_CLUSTER=ap1
+
+# Google OAuth (for Google Sign-In)
+GOOGLE_CLIENT_ID=your-web-oauth_client_id.apps.googleusercontent.com
 ```
 
 Note: Server runs on port 3001 (not 3000) to avoid conflicts.
@@ -101,7 +104,8 @@ Server runs on http://localhost:3001
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | /auth/register | Register new user |
-| POST | /auth/login | Login, get JWT token |
+| POST | /auth/login | Login with email/password |
+| POST | /auth/google | Login with Google (OAuth) |
 | GET | /auth/users | Get all users |
 | GET | /auth/users/:id | Get user by ID |
 

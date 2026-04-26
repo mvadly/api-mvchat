@@ -71,4 +71,8 @@ export class ConfigService {
   get clientUrl(): string {
     return this.nestConfig.get<string>('CLIENT_URL') || 'http://localhost:3001';
   }
+
+  get googleClientId(): string {
+    return this.nestConfig.get<string>('GOOGLE_CLIENT_ID') || '';
+  }
 }

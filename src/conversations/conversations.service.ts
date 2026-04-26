@@ -5,13 +5,13 @@ import { Conversation, ConversationMember } from '../common/interfaces';
 @Injectable()
 export class ConversationsService {
   private readonly logger = new Logger(ConversationsService.name);
-  private readonly SHEET_NAME = 'Conversations';
+  private readonly CONVERSATION_SHEET = 'Conversations';
   private readonly MEMBERS_SHEET = 'ConversationMembers';
 
   constructor(private googleSheets: GoogleSheetsService) {}
 
   async findAll(): Promise<Conversation[]> {
-    const data = await this.googleSheets.getValues(this.SHEET_NAME);
+    const data = await this.googleSheets.getValues(this.CONVERSATION_SHEET);
     if (!data.length) return [];
 
     const conversations: Conversation[] = [];
@@ -58,7 +58,7 @@ export class ConversationsService {
     const id = this.generateId();
     const createdAt = new Date().toISOString();
 
-    await this.googleSheets.appendValues(`${this.SHEET_NAME}!A${(await this.getNextRow())}:D`, [[id, name, type, createdAt]]);
+    await this.googleSheets.appendValues(`${this.CONVERSATION_SHEET}!A${(await this.getNextRow())}:D`, [[id, name, type, createdAt]]);
 
     for (const userId of memberIds) {
       await this.googleSheets.appendValues(`${this.MEMBERS_SHEET}!A${(await this.getNextMemberRow())}:C`, [[id, userId, 'member']]);
@@ -111,7 +111,7 @@ export class ConversationsService {
     lastSenderId: string,
     lastSenderName: string
   ): Promise<void> {
-    const data = await this.googleSheets.getValues(this.SHEET_NAME);
+    const data = await this.googleSheets.getValues(this.CONVERSATION_SHEET);
     let rowIndex = -1;
 
     for (let i = 1; i < data.length; i++) {
@@ -123,7 +123,7 @@ export class ConversationsService {
 
     if (rowIndex === -1) return;
 
-    const range = `A${rowIndex}:H`;
+    const range = `${this.CONVERSATION_SHEET}!A${rowIndex}:H`;
     const existingRow = data[rowIndex - 1] || [];
     const currentValues = [
       existingRow[0] || '',
@@ -145,7 +145,8 @@ export class ConversationsService {
   }
 
   private async getNextRow(): Promise<number> {
-    const data = await this.googleSheets.getValues(this.SHEET_NAME);
+    const data = await this.googleSheets.getValues(this.CONVERSATION_SHEET);
+    this.logger.log(`Conversations sheet row count: ${data.length}, sheet: ${this.CONVERSATION_SHEET}`);
     return data.length + 1;
   }
 
