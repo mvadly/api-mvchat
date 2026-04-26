@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { GoogleSheetsService } from '../config';
 import { Message } from '../common/interfaces';
+import { pusherServer } from '../config/pusher.config';
 
 @Injectable()
 export class MessagesService {
@@ -38,14 +39,12 @@ export class MessagesService {
 
   async findByConversation(conversationId: string): Promise<Message[]> {
     const data = this.messages.get(conversationId);
-    console.log(`Finding messages for conversation ${conversationId}:`, data);
     return data || [];
   }
 
-  async create(conversationId: string, senderId: string, content: string, type: 'text' | 'image' = 'text'): Promise<Message> {
+  async createMessage(conversationId: string, senderId: string, senderName: string, content: string, type: 'text' | 'image' = 'text'): Promise<Message> {
     const id = this.generateId();
     const createdAt = new Date().toISOString();
-    const senderName = 'Unknown Sender';
 
     const message: Message = { id, conversationId, senderId, senderName, content, type, createdAt };
 
@@ -56,8 +55,28 @@ export class MessagesService {
 
     await this.googleSheets.appendValues(`${this.SHEET_NAME}!A${(await this.getNextRow())}:H`, [[id, conversationId, senderId, senderName, content, type, createdAt, '']]);
 
+    // Trigger Pusher notification
+    try {
+      await pusherServer.trigger('chat', 'newMessage', {
+        id: message.id,
+        conversationId: message.conversationId,
+        senderId: message.senderId,
+        senderName: message.senderName,
+        content: message.content,
+        type: message.type,
+        createdAt: message.createdAt,
+      });
+      this.logger.log(`Pusher triggered for message: ${message.id}`);
+    } catch (pusherError) {
+      this.logger.error(`Pusher trigger error: ${pusherError}`);
+    }
+
     this.logger.log(`Message created: ${id}`);
     return message;
+  }
+
+  async create(conversationId: string, senderId: string, content: string, type: 'text' | 'image' = 'text'): Promise<Message> {
+    return this.createMessage(conversationId, senderId, 'Unknown Sender', content, type);
   }
 
   async markAsRead(messageId: string): Promise<void> {
@@ -90,6 +109,23 @@ export class MessagesService {
       [[message.id, message.conversationId, message.senderId, message.senderName || 'Unknown Sender', message.content, message.type, message.createdAt, message.readAt || '']]
     );
     this.logger.log(`Message upserted: ${message.id}`);
+    
+    // Trigger Pusher notification
+    try {
+      await pusherServer.trigger('chat', 'newMessage', {
+        id: message.id,
+        conversationId: message.conversationId,
+        senderId: message.senderId,
+        senderName: message.senderName || 'Unknown Sender',
+        content: message.content,
+        type: message.type,
+        createdAt: message.createdAt,
+      });
+      this.logger.log(`Pusher triggered for message: ${message.id}`);
+    } catch (pusherError) {
+      this.logger.error(`Pusher trigger error: ${pusherError}`);
+    }
+    
     return message;
   }
 
