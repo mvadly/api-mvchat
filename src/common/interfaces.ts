@@ -28,6 +28,10 @@ export interface Conversation {
   name: string;
   type: 'direct' | 'group';
   createdAt: string;
+  lastMessage?: string;
+  lastMessageTime?: string;
+  lastSenderId?: string;
+  lastSenderName?: string;
 }
 
 export interface ConversationMember {

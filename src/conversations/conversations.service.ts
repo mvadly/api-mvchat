@@ -23,6 +23,10 @@ export class ConversationsService {
           name: row[1],
           type: row[2] as 'direct' | 'group',
           createdAt: row[3],
+          lastMessage: row[4] || '',
+          lastMessageTime: row[5] || '',
+          lastSenderId: row[6] || '',
+          lastSenderName: row[7] || '',
         });
       }
     }
@@ -98,6 +102,42 @@ export class ConversationsService {
       }
     }
     return members;
+  }
+
+  async updateLastMessage(
+    conversationId: string,
+    lastMessage: string,
+    lastMessageTime: string,
+    lastSenderId: string,
+    lastSenderName: string
+  ): Promise<void> {
+    const data = await this.googleSheets.getValues(this.SHEET_NAME);
+    let rowIndex = -1;
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i].length >= 1 && data[i][0] === conversationId) {
+        rowIndex = i + 1;
+        break;
+      }
+    }
+
+    if (rowIndex === -1) return;
+
+    const range = `A${rowIndex}:H`;
+    const existingRow = data[rowIndex - 1] || [];
+    const currentValues = [
+      existingRow[0] || '',
+      existingRow[1] || '',
+      existingRow[2] || '',
+      existingRow[3] || '',
+      lastMessage,
+      lastMessageTime,
+      lastSenderId,
+      lastSenderName,
+    ];
+
+    await this.googleSheets.updateValues(range, [currentValues]);
+    this.logger.log(`Updated lastMessage for conversation: ${conversationId}`);
   }
 
   private generateId(): string {

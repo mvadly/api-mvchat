@@ -4,7 +4,7 @@ NestJS Backend for WhatsApp-like Chat Application with Google Sheets storage.
 
 ## Tech Stack
 - NestJS 10.x + TypeScript
-- Socket.io for WebSocket real-time messaging
+- Pusher for real-time messaging (works on serverless/Vercel)
 - Google Sheets API for data storage
 - JWT Authentication
 
@@ -29,6 +29,12 @@ JWT_EXPIRES_IN=7d
 GOOGLE_SPREADSHEET_ID=10bLHBJ0rWQyaDv2uVwYmNVNxcBHX2tZw3B01RSkXrxc
 CLIENT_URL=http://localhost:3001
 GOOGLE_SERVICE_ACCOUNT_KEY={"type": "service_account","project_id": "xxx",...}
+
+# Pusher Configuration
+PUSHER_APP_ID=1403689
+PUSHER_KEY=67678fab751961ef6d68
+PUSHER_SECRET=dd87d1976ef3266e7cd2
+PUSHER_CLUSTER=ap1
 ```
 
 Note: Server runs on port 3001 (not 3000) to avoid conflicts.
@@ -74,7 +80,7 @@ Your spreadsheet must have these sheets:
 | G | createdAt |
 | H | readAt |
 
-**Important:** The Messages sheet was updated to include senderName in column D.
+**Important:** The Messages sheet includes senderName in column D.
 
 ## Run
 
@@ -113,54 +119,48 @@ Server runs on http://localhost:3001
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | /messages/conversation/:conversationId | Get messages by conversation |
+| POST | /messages | Create message (saves to Google Sheets + triggers Pusher) |
 | POST | /messages/upsert | Insert or update message (idempotent) |
 
 ## Message Flow Architecture
 
-This backend uses a unique message flow to prevent duplicates:
+This backend uses Pusher for real-time messaging, which works on serverless platforms like Vercel.
 
 ### Send Message Flow
 ```
-1. Flutter sends message via WebSocket
-2. Backend broadcasts to all clients in room (real-time, NO persistence)
-3. Each client receives WebSocket message
-4. Client calls POST /messages/upsert to save to Google Sheets
-5. On receive: if message ID exists, UPDATE; if not, INSERT
+1. Flutter sends message via REST API (POST /messages)
+2. Backend saves message to Google Sheets
+3. Backend triggers Pusher event ('chat', 'newMessage')
+4. All subscribed clients receive the message via Pusher
+5. Clients poll every 2 seconds as backup for new messages
 ```
 
 ### Why This Architecture?
-- Prevents duplicate messages in Google Sheets
-- Real-time delivery via WebSocket
-- Persisted via upsert on client side
-- Works across multiple devices
+- Works on serverless platforms (Vercel) where WebSocket is not supported
+- Pusher provides reliable real-time delivery
+- Polling as backup ensures no missed messages
+- Prevents duplicate messages via upsert logic
 
-## WebSocket Events
+## Pusher Integration
 
-### Connect
+The backend triggers a Pusher event after saving each message to Google Sheets:
+
 ```javascript
-import { io } from 'socket.io-client';
-
-const socket = io('http://localhost:3001', {
-  extraHeaders: {
-    'Authorization': 'Bearer <JWT_TOKEN>'
-  }
+// Trigger Pusher after saving
+await pusherServer.trigger('chat', 'newMessage', {
+  id: message.id,
+  conversationId: message.conversationId,
+  senderId: message.senderId,
+  senderName: message.senderName,
+  content: message.content,
+  type: message.type,
+  createdAt: message.createdAt,
 });
 ```
 
-### Client Events
-| Event | Payload | Description |
-|-------|---------|-------------|
-| join | { conversationId, userId } | Join room |
-| leave | { conversationId, userId } | Leave room |
-| message | { conversationId, senderId, senderName, content, type } | Send message (broadcast only, not persisted) |
-| typing | { conversationId, userId, userName } | User typing |
-| read | { messageId } | Mark as read |
-
-### Server Events (Received)
-| Event | Data | Description |
-|-------|------|-------------|
-| newMessage | Message object with senderName | New message received |
-| userTyping | { userId, userName } | User is typing |
+### Pusher Channel
+- Channel: `chat` (general) and `chat-{conversationId}` (per conversation)
+- Event: `newMessage`
 
 ## Example Usage
 
@@ -178,10 +178,12 @@ curl -X POST http://localhost:3001/auth/login \
   -d '{"email":"john@example.com","password":"123456"}'
 ```
 
-### Create Direct Conversation
+### Send Message
 ```bash
-curl -X GET http://localhost:3001/conversations/direct/user1_id/user2_id \
-  -H "Authorization: Bearer <TOKEN>"
+curl -X POST http://localhost:3001/messages \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -d '{"conversationId":"conv_xxx","senderId":"usr_xxx","content":"Hello!"}'
 ```
 
 ### Get Messages
@@ -209,7 +211,12 @@ PORT=3002
 ### Messages not showing
 - Check Messages sheet has correct headers (8 columns including senderName)
 - Verify column D header is "senderName"
-- Check console for error logs
+- Check console for error logs by running `npm run start:dev`
+
+### Pusher not working
+- Verify Pusher credentials in .env are correct
+- Check Pusher app is active in pusher.com dashboard
+- Verify cluster matches (e.g., ap1, us2)
 
 ## Project Structure
 
@@ -221,7 +228,8 @@ api-mvchat/
 │   ├── config/               # Configuration
 │   │   ├── config.module.ts
 │   │   ├── config.service.ts
-│   │   └── google-sheets.service.ts
+│   │   ├── google-sheets.service.ts
+│   │   └── pusher.config.ts   # Pusher server configuration
 │   ├── auth/                 # Authentication
 │   │   ├── auth.module.ts
 │   │   ├── auth.service.ts
@@ -239,9 +247,6 @@ api-mvchat/
 │   │   ├── messages.module.ts
 │   │   ├── messages.service.ts
 │   │   └── messages.controller.ts
-│   ├── gateway/            # WebSocket
-│   │   ├── chat.gateway.ts
-│   │   └── gateway.module.ts
 │   └── common/             # Shared
 │       └── interfaces.ts
 ├── .env                   # Environment variables

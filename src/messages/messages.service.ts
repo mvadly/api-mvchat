@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { GoogleSheetsService } from '../config';
 import { Message } from '../common/interfaces';
 import { pusherServer } from '../config/pusher.config';
+import { ConversationsService } from '../conversations/conversations.service';
 
 @Injectable()
 export class MessagesService {
@@ -9,7 +10,10 @@ export class MessagesService {
   private readonly SHEET_NAME = 'Messages';
   private messages: Map<string, Message[]> = new Map();
 
-  constructor(private googleSheets: GoogleSheetsService) {
+  constructor(
+    private googleSheets: GoogleSheetsService,
+    private conversationsService: ConversationsService,
+  ) {
     this.loadFromSheet();
   }
 
@@ -55,7 +59,16 @@ export class MessagesService {
 
     await this.googleSheets.appendValues(`${this.SHEET_NAME}!A${(await this.getNextRow())}:H`, [[id, conversationId, senderId, senderName, content, type, createdAt, '']]);
 
-    // Trigger Pusher notification
+    // Update conversation last message
+    await this.conversationsService.updateLastMessage(
+      conversationId,
+      content,
+      createdAt,
+      senderId,
+      senderName,
+    );
+
+    // Trigger Pusher notifications
     try {
       await pusherServer.trigger('chat', 'newMessage', {
         id: message.id,
@@ -66,6 +79,15 @@ export class MessagesService {
         type: message.type,
         createdAt: message.createdAt,
       });
+
+      await pusherServer.trigger('chat', 'conversationUpdate', {
+        conversationId: message.conversationId,
+        lastMessage: message.content,
+        lastMessageTime: message.createdAt,
+        lastSenderId: message.senderId,
+        lastSenderName: message.senderName,
+      });
+
       this.logger.log(`Pusher triggered for message: ${message.id}`);
     } catch (pusherError) {
       this.logger.error(`Pusher trigger error: ${pusherError}`);
@@ -110,7 +132,16 @@ export class MessagesService {
     );
     this.logger.log(`Message upserted: ${message.id}`);
     
-    // Trigger Pusher notification
+    // Update conversation last message
+    await this.conversationsService.updateLastMessage(
+      message.conversationId,
+      message.content,
+      message.createdAt,
+      message.senderId,
+      message.senderName || 'Unknown Sender',
+    );
+    
+    // Trigger Pusher notifications
     try {
       await pusherServer.trigger('chat', 'newMessage', {
         id: message.id,
@@ -121,6 +152,15 @@ export class MessagesService {
         type: message.type,
         createdAt: message.createdAt,
       });
+
+      await pusherServer.trigger('chat', 'conversationUpdate', {
+        conversationId: message.conversationId,
+        lastMessage: message.content,
+        lastMessageTime: message.createdAt,
+        lastSenderId: message.senderId,
+        lastSenderName: message.senderName || 'Unknown Sender',
+      });
+
       this.logger.log(`Pusher triggered for message: ${message.id}`);
     } catch (pusherError) {
       this.logger.error(`Pusher trigger error: ${pusherError}`);
