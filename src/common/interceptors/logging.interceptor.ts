@@ -17,7 +17,6 @@ export class LoggingInterceptor implements NestInterceptor {
 
     // Log Request
     this.logger.log(`==> REQUEST ${method} ${url}`);
-    this.logger.log(`    Headers: ${JSON.stringify(this.sanitizeHeaders(headers))}`);
     this.logger.log(`    Body: ${JSON.stringify(this.sanitizeBody(body))}`);
     if (query && Object.keys(query).length > 0) {
       this.logger.log(`    Query: ${JSON.stringify(query)}`);
@@ -29,7 +28,6 @@ export class LoggingInterceptor implements NestInterceptor {
       tap({
         next: (data) => {
           this.logger.log(`<== RESPONSE ${method} ${url} ${statusCode} (${Date.now() - now}ms)`);
-          this.logger.log(`    Headers: ${JSON.stringify(response.getHeaders())}`);
           this.logger.log(`    Body: ${JSON.stringify(data)}`);
         },
         error: (error) => {
