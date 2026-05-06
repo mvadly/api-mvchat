@@ -75,4 +75,12 @@ export class ConfigService {
   get googleClientId(): string {
     return this.nestConfig.get<string>('GOOGLE_CLIENT_ID') || '';
   }
+
+  get oneSignalAppId(): string {
+    return this.nestConfig.get<string>('ONESIGNAL_APP_ID') || '';
+  }
+
+  get oneSignalApiKey(): string {
+    return this.nestConfig.get<string>('ONESIGNAL_API_KEY') || '';
+  }
 }

@@ -5,6 +5,7 @@ export interface User {
   passwordHash: string;
   avatarUrl?: string;
   createdAt: string;
+  playerId?: string;
 }
 
 export interface CreateUserDto {

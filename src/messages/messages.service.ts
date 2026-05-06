@@ -3,6 +3,8 @@ import { GoogleSheetsService } from '../config';
 import { Message } from '../common/interfaces';
 import { pusherServer } from '../config/pusher.config';
 import { ConversationsService } from '../conversations/conversations.service';
+import { PushService } from '../config/push.service';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class MessagesService {
@@ -13,6 +15,8 @@ export class MessagesService {
   constructor(
     private googleSheets: GoogleSheetsService,
     private conversationsService: ConversationsService,
+    private pushService: PushService,
+    private usersService: UsersService,
   ) {
     this.loadFromSheet();
   }
@@ -93,6 +97,14 @@ export class MessagesService {
       this.logger.error(`Pusher trigger error: ${pusherError}`);
     }
 
+    // Send push notification to conversation members (except sender)
+    this.sendPushNotification(
+      conversationId,
+      senderId,
+      senderName,
+      content,
+    );
+
     this.logger.log(`Message created: ${id}`);
     return message;
   }
@@ -166,6 +178,14 @@ export class MessagesService {
       this.logger.error(`Pusher trigger error: ${pusherError}`);
     }
     
+    // Send push notification to conversation members (except sender)
+    this.sendPushNotification(
+      message.conversationId,
+      message.senderId,
+      message.senderName || 'Unknown Sender',
+      message.content,
+    );
+    
     return message;
   }
 
@@ -185,6 +205,42 @@ export class MessagesService {
 
   private generateId(): string {
     return 'msg_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+  }
+
+  private async sendPushNotification(
+    conversationId: string,
+    senderId: string,
+    senderName: string,
+    content: string,
+  ): Promise<void> {
+    try {
+      const members = await this.conversationsService.getMembers(conversationId);
+      const receivers = members.filter((m) => m !== senderId);
+
+      for (const receiverId of receivers) {
+        const user = await this.usersService.findById(receiverId);
+        const playerId = (user as any)?.playerId;
+
+        if (playerId) {
+          const conversation = await this.conversationsService.findById(conversationId);
+          const title = conversation?.name || senderName;
+          const message = `${senderName}: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`;
+
+          await this.pushService.sendNotification({
+            playerId,
+            title,
+            message,
+            data: {
+              conversationId,
+              senderId,
+              messageId: conversationId,
+            },
+          });
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Push notification error: ${error}`);
+    }
   }
 
   private async getNextRow(): Promise<number> {

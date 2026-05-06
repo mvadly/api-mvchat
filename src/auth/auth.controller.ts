@@ -5,6 +5,7 @@ import { CreateUserDto, LoginDto } from '../users/dto/users.dto';
 import { ConfigService } from '../config/config.service';
 import { OAuth2Client } from 'google-auth-library';
 import { User } from '../common/interfaces';
+import { GoogleSheetsService } from '../config';
 
 @Controller('auth')
 export class AuthController {
@@ -14,6 +15,7 @@ export class AuthController {
     private authService: AuthService,
     private usersService: UsersService,
     private configService: ConfigService,
+    private googleSheets: GoogleSheetsService,
   ) {
     this.oauth2Client = new OAuth2Client(
       this.configService.googleClientId,
@@ -96,6 +98,31 @@ export class AuthController {
     } catch (error) {
       console.error('Google login error:', error);
       return { success: false, message: 'Invalid Google token' };
+    }
+  }
+
+  @Post('update-token')
+  @HttpCode(HttpStatus.OK)
+  async updateToken(@Body() body: { userId: string; playerId: string }) {
+    try {
+      const { userId, playerId } = body;
+      if (!userId || !playerId) {
+        return { success: false, message: 'userId and playerId are required' };
+      }
+
+      const data = await this.googleSheets.getValues('Users');
+      for (let i = 1; i < data.length; i++) {
+        if (data[i].length >= 1 && data[i][0] === userId) {
+          const row = i + 1;
+          await this.googleSheets.updateValues(`Users!G${row}`, [[playerId]]);
+          return { success: true, message: 'Token updated' };
+        }
+      }
+
+      return { success: false, message: 'User not found' };
+    } catch (error) {
+      console.error('Update token error:', error);
+      return { success: false, message: 'Failed to update token' };
     }
   }
 }

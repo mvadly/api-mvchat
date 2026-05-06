@@ -29,6 +29,7 @@ export class UsersService {
       user.passwordHash = row[headers.indexOf('password')] || '';
       user.avatarUrl = row[headers.indexOf('avatar_url')] || '';
       user.createdAt = row[headers.indexOf('created_at')] || '';
+      user.playerId = row[headers.indexOf('player_id')] || row[6] || '';
       
       if (user.id) users.push(user as User);
     }
