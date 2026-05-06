@@ -38,6 +38,10 @@ PUSHER_CLUSTER=ap1
 
 # Google OAuth (for Google Sign-In)
 GOOGLE_CLIENT_ID=your-web-oauth_client_id.apps.googleusercontent.com
+
+# OneSignal Push Notifications
+ONESIGNAL_APP_ID=your-onesignal-app-id
+ONESIGNAL_API_KEY=your-onesignal-rest-api-key
 ```
 
 Note: Server runs on port 3001 (not 3000) to avoid conflicts.
@@ -55,6 +59,7 @@ Your spreadsheet must have these sheets:
 | D | passwordHash |
 | E | avatarUrl |
 | F | createdAt |
+| G | playerId (OneSignal push notification ID) |
 
 ### 2. Conversations Sheet
 | Column | Header |
@@ -130,19 +135,140 @@ Server runs on http://localhost:3001
 
 This backend uses Pusher for real-time messaging, which works on serverless platforms like Vercel.
 
-### Send Message Flow
+### Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant F as Flutter Client
+    participant A as AuthController
+    participant U as UsersService
+    participant S as Google Sheets
+    participant G as Google OAuth
+
+    alt Email/Password
+        F->>A: POST /auth/register
+        A->>S: Check if email exists
+        A->>U: Create user (bcrypt hash)
+        U->>S: Append to Users sheet
+        A->>A: Generate JWT token
+        A->>F: Return { token, user }
+        F->>A: POST /auth/login
+        A->>S: Find user by email
+        A->>U: Verify password
+        A->>A: Generate JWT token
+        A->>F: Return { token, user }
+    else Google OAuth
+        F->>A: POST /auth/google
+        A->>G: Verify Google token
+        G->>A: Return user info
+        A->>S: Find or create user
+        A->>A: Generate JWT token
+        A->>F: Return { token, user }
+    end
 ```
-1. Flutter sends message via REST API (POST /messages)
-2. Backend saves message to Google Sheets
-3. Backend triggers Pusher event ('chat', 'newMessage')
-4. All subscribed clients receive the message via Pusher
-5. Clients poll every 2 seconds as backup for new messages
+
+### Send Message Flow
+
+```mermaid
+sequenceDiagram
+    participant F as Flutter Client
+    participant M as MessagesService
+    participant S as Google Sheets
+    participant C as ConversationsService
+    participant P as Pusher
+    participant O as PushService
+    participant R as Receiver
+
+    F->>M: POST /messages
+    M->>S: Save to Messages sheet
+    M->>C: Update lastMessage
+    C->>S: Update Conversations sheet
+    M->>P: Trigger newMessage event
+    P->>R: Real-time notification
+    M->>O: Send push notification
+    O->>R: OneSignal push (if app closed)
+    M->>F: Return saved message
+```
+
+### Real-time Update Flow (with Fallback)
+
+```mermaid
+sequenceDiagram
+    participant F as Flutter Client
+    participant B as Backend API
+    participant S as Google Sheets
+    participant P as Pusher
+    participant Poll as Polling (30s)
+
+    F->>B: POST /messages
+    B->>S: Save to Sheets
+    B->>P: Trigger event
+
+    alt Pusher Success
+        P->>F: Receive event immediately
+    else Pusher Fails
+        P--x F: No event received
+        Poll->>B: GET /messages (30s interval)
+        B->>S: Fetch messages
+        B->>Poll: Return new messages
+        Poll->>F: Update UI with new messages
+    end
+```
+
+### Push Notification Flow
+
+```mermaid
+sequenceDiagram
+    participant F as Flutter App
+    participant B as Backend API
+    participant S as Google Sheets
+    participant O as OneSignal API
+    participant D as Device
+
+    F->>B: POST /auth/update-token
+    B->>S: Store playerId in Users sheet
+
+    note over F,D: Receiver app in background/closed
+
+    B->>B: Message received for User B
+    B->>S: Get User B's playerId
+    B->>O: POST /notifications
+    O->>D: Push notification delivered
+    D->>D: Show on lock screen
+    D->>F: User taps notification
+    F->>B: Open chat with conversationId
+```
+
+### Data Architecture
+
+```mermaid
+graph TD
+    GS[Google Sheets]
+    
+    GS --> U[Users Sheet]
+    GS --> C[Conversations Sheet]
+    GS --> CM[ConversationMembers Sheet]
+    GS --> M[Messages Sheet]
+    
+    U --> U1[id, username, email, passwordHash]
+    U --> U2[avatarUrl, createdAt, playerId]
+    
+    C --> C1[id, name, type, createdAt]
+    C --> C2[lastMessage, lastMessageTime]
+    C --> C3[lastSenderId, lastSenderName]
+    
+    CM --> CM1[conversationId, userId, role]
+    
+    M --> M1[id, conversationId, senderId]
+    M --> M2[senderName, content, type]
+    M --> M3[createdAt, readAt]
 ```
 
 ### Why This Architecture?
 - Works on serverless platforms (Vercel) where WebSocket is not supported
 - Pusher provides reliable real-time delivery
 - Polling as backup ensures no missed messages
+- OneSignal push notifications work when app is closed
 - Prevents duplicate messages via upsert logic
 
 ## Pusher Integration
@@ -222,6 +348,32 @@ PORT=3002
 - Check Pusher app is active in pusher.com dashboard
 - Verify cluster matches (e.g., ap1, us2)
 
+### Push notifications not showing
+- Check OneSignal credentials in .env
+- Verify app has internet permission
+- Check OneSignal dashboard for notification delivery status
+- Ensure playerId is saved to Users sheet (column G)
+
+## Push Notifications
+
+The app uses OneSignal for push notifications when users receive messages while the app is closed or in background.
+
+### How It Works
+
+```
+1. User opens app → OneSignal SDK registers device → playerId sent to backend
+2. Backend stores playerId in Users sheet (column G)
+3. When message saved → Backend calls OneSignal API → Receiver gets notification
+4. Notification shows: "ConversationName: Sender: message preview"
+```
+
+### Setup OneSignal
+
+1. Create account at [OneSignal.com](https://onesignal.com)
+2. Create new app → Get `ONESIGNAL_APP_ID` and `ONESIGNAL_API_KEY`
+3. Add credentials to `.env`
+4. Download `google-services.json` from OneSignal setup → place in Flutter `android/app/`
+
 ## Project Structure
 
 ```
@@ -233,7 +385,8 @@ api-mvchat/
 │   │   ├── config.module.ts
 │   │   ├── config.service.ts
 │   │   ├── google-sheets.service.ts
-│   │   └── pusher.config.ts   # Pusher server configuration
+│   │   ├── pusher.config.ts   # Pusher server configuration
+│   │   └── push.service.ts    # OneSignal push notification service
 │   ├── auth/                 # Authentication
 │   │   ├── auth.module.ts
 │   │   ├── auth.service.ts
