@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GoogleSheetsService } from '../config';
-import { Message } from '../common/interfaces';
+import { SupabaseService, Message } from '../config';
 import { pusherServer } from '../config/pusher.config';
 import { ConversationsService } from '../conversations/conversations.service';
 import { PushService } from '../config/push.service';
@@ -9,65 +8,38 @@ import { UsersService } from '../users/users.service';
 @Injectable()
 export class MessagesService {
   private readonly logger = new Logger(MessagesService.name);
-  private readonly MESSAGES_SHEET = 'Messages';
-  private messages: Map<string, Message[]> = new Map();
 
   constructor(
-    private googleSheets: GoogleSheetsService,
+    private supabase: SupabaseService,
     private conversationsService: ConversationsService,
     private pushService: PushService,
     private usersService: UsersService,
-  ) {
-    this.loadFromSheet();
-  }
-
-  private async loadFromSheet() {
-    const data = await this.googleSheets.getValues(this.MESSAGES_SHEET);
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      if (row.length >= 7) {
-        const message: Message = {
-          id: row[0],
-          conversationId: row[1],
-          senderId: row[2],
-          senderName: row[3] || 'Unknown Sender',
-          content: row[4],
-          type: row[5] as 'text' | 'image',
-          createdAt: row[6],
-          readAt: row[7] || undefined,
-        };
-        if (!this.messages.has(message.conversationId)) {
-          this.messages.set(message.conversationId, []);
-        }
-        this.messages.get(message.conversationId)!.push(message);
-      }
-    }
-    this.logger.log(`Loaded ${this.messages.size} conversations with messages`);
-  }
+  ) {}
 
   async findByConversation(conversationId: string): Promise<Message[]> {
-    const data = this.messages.get(conversationId);
-    return data || [];
+    return this.supabase.findMessagesByConversation(conversationId);
   }
 
-  async createMessage(conversationId: string, senderId: string, senderName: string, content: string, type: 'text' | 'image' = 'text'): Promise<Message> {
-    const id = this.generateId();
-    const createdAt = new Date().toISOString();
-
-    const message: Message = { id, conversationId, senderId, senderName, content, type, createdAt };
-
-    if (!this.messages.has(conversationId)) {
-      this.messages.set(conversationId, []);
-    }
-    this.messages.get(conversationId)!.push(message);
-
-    await this.googleSheets.appendValues(`${this.MESSAGES_SHEET}!A${(await this.getNextRow())}:H`, [[id, conversationId, senderId, senderName, content, type, createdAt, '']]);
+  async createMessage(
+    conversationId: string,
+    senderId: string,
+    senderName: string,
+    content: string,
+    type: 'text' | 'image' = 'text'
+  ): Promise<Message> {
+    const message = await this.supabase.createMessage({
+      conversation_id: conversationId,
+      sender_id: senderId,
+      sender_name: senderName,
+      content,
+      type,
+    });
 
     // Update conversation last message
     await this.conversationsService.updateLastMessage(
       conversationId,
       content,
-      createdAt,
+      message.created_at,
       senderId,
       senderName,
     );
@@ -76,20 +48,20 @@ export class MessagesService {
     try {
       await pusherServer.trigger('chat', 'newMessage', {
         id: message.id,
-        conversationId: message.conversationId,
-        senderId: message.senderId,
-        senderName: message.senderName,
+        conversationId: message.conversation_id,
+        senderId: message.sender_id,
+        senderName: message.sender_name,
         content: message.content,
         type: message.type,
-        createdAt: message.createdAt,
+        createdAt: message.created_at,
       });
 
       await pusherServer.trigger('chat', 'conversationUpdate', {
-        conversationId: message.conversationId,
+        conversationId: message.conversation_id,
         lastMessage: message.content,
-        lastMessageTime: message.createdAt,
-        lastSenderId: message.senderId,
-        lastSenderName: message.senderName,
+        lastMessageTime: message.created_at,
+        lastSenderId: message.sender_id,
+        lastSenderName: message.sender_name,
       });
 
       this.logger.log(`Pusher triggered for message: ${message.id}`);
@@ -105,106 +77,79 @@ export class MessagesService {
       content,
     );
 
-    this.logger.log(`Message created: ${id}`);
-    return message;
+    this.logger.log(`Message created: ${message.id}`);
+    return this.mapToMessage(message);
   }
 
-  async create(conversationId: string, senderId: string, content: string, type: 'text' | 'image' = 'text'): Promise<Message> {
+  async create(
+    conversationId: string,
+    senderId: string,
+    content: string,
+    type: 'text' | 'image' = 'text'
+  ): Promise<Message> {
     return this.createMessage(conversationId, senderId, 'Unknown Sender', content, type);
   }
 
   async markAsRead(messageId: string): Promise<void> {
-    for (const [convId, messages] of this.messages.entries()) {
-      const msg = messages.find(m => m.id === messageId);
-      if (msg) {
-        msg.readAt = new Date().toISOString();
-        break;
-      }
-    }
+    await this.supabase.markMessageAsRead(messageId);
   }
 
   async upsertMessage(message: Message): Promise<Message> {
-    console.log('Upserting message:', message);
-    for (const [convId, messages] of this.messages.entries()) {
-      const existingIndex = messages.findIndex(m => m.id === message.id);
-      if (existingIndex !== -1) {
-        messages[existingIndex] = message;
-        await this.updateRow(message);
-        this.logger.log(`Message updated: ${message.id}`);
-        return message;
-      }
-    }
-    if (!this.messages.has(message.conversationId)) {
-      this.messages.set(message.conversationId, []);
-    }
-    this.messages.get(message.conversationId)!.push(message);
-    await this.googleSheets.appendValues(
-      `${this.MESSAGES_SHEET}!A${(await this.getNextRow())}:H`,
-      [[message.id, message.conversationId, message.senderId, message.senderName || 'Unknown Sender', message.content, message.type, message.createdAt, message.readAt || '']]
-    );
-    this.logger.log(`Message upserted: ${message.id}`);
-    
+    const upserted = await this.supabase.upsertMessage({
+      id: message.id,
+      conversation_id: message.conversation_id,
+      sender_id: message.sender_id,
+      sender_name: message.sender_name || 'Unknown Sender',
+      content: message.content,
+      type: message.type,
+      created_at: message.created_at,
+      read_at: message.read_at,
+    });
+
     // Update conversation last message
     await this.conversationsService.updateLastMessage(
-      message.conversationId,
-      message.content,
-      message.createdAt,
-      message.senderId,
-      message.senderName || 'Unknown Sender',
+      upserted.conversation_id,
+      upserted.content,
+      upserted.created_at,
+      upserted.sender_id,
+      upserted.sender_name,
     );
-    
+
     // Trigger Pusher notifications
     try {
       await pusherServer.trigger('chat', 'newMessage', {
-        id: message.id,
-        conversationId: message.conversationId,
-        senderId: message.senderId,
-        senderName: message.senderName || 'Unknown Sender',
-        content: message.content,
-        type: message.type,
-        createdAt: message.createdAt,
+        id: upserted.id,
+        conversation_id: upserted.conversation_id,
+        sender_id: upserted.sender_id,
+        sender_name: upserted.sender_name,
+        content: upserted.content,
+        type: upserted.type,
+        created_at: upserted.created_at,
       });
 
       await pusherServer.trigger('chat', 'conversationUpdate', {
-        conversationId: message.conversationId,
-        lastMessage: message.content,
-        lastMessageTime: message.createdAt,
-        lastSenderId: message.senderId,
-        lastSenderName: message.senderName || 'Unknown Sender',
+        conversation_id: upserted.conversation_id,
+        last_message: upserted.content,
+        last_message_time: upserted.created_at,
+        last_sender_id: upserted.sender_id,
+        last_sender_name: upserted.sender_name,
       });
 
-      this.logger.log(`Pusher triggered for message: ${message.id}`);
+      this.logger.log(`Pusher triggered for message: ${upserted.id}`);
     } catch (pusherError) {
       this.logger.error(`Pusher trigger error: ${pusherError}`);
     }
-    
-    // Send push notification to conversation members (except sender)
+
+    // Send push notification
     this.sendPushNotification(
-      message.conversationId,
-      message.senderId,
-      message.senderName || 'Unknown Sender',
-      message.content,
+      upserted.conversation_id,
+      upserted.sender_id,
+      upserted.sender_name,
+      upserted.content,
     );
-    
-    return message;
-  }
 
-  private async updateRow(message: Message): Promise<void> {
-    const data = await this.googleSheets.getValues(this.MESSAGES_SHEET);
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === message.id) {
-        const row = i + 1;
-        await this.googleSheets.updateValues(
-          `${this.MESSAGES_SHEET}!A${row}:H`,
-          [[message.id, message.conversationId, message.senderId, message.senderName || 'Unknown Sender', message.content, message.type, message.createdAt, message.readAt || '']]
-        );
-        return;
-      }
-    }
-  }
-
-  private generateId(): string {
-    return 'msg_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+    this.logger.log(`Message upserted: ${upserted.id}`);
+    return this.mapToMessage(upserted);
   }
 
   private async sendPushNotification(
@@ -219,7 +164,7 @@ export class MessagesService {
 
       for (const receiverId of receivers) {
         const user = await this.usersService.findById(receiverId);
-        const playerId = (user as any)?.playerId;
+        const playerId = (user as any)?.player_id;
 
         if (playerId) {
           const conversation = await this.conversationsService.findById(conversationId);
@@ -231,9 +176,9 @@ export class MessagesService {
             title,
             message,
             data: {
-              conversationId,
-              senderId,
-              messageId: conversationId,
+              conversation_id: conversationId,
+              sender_id: senderId,
+              message_id: conversationId,
             },
           });
         }
@@ -243,8 +188,16 @@ export class MessagesService {
     }
   }
 
-  private async getNextRow(): Promise<number> {
-    const data = await this.googleSheets.getValues(this.MESSAGES_SHEET);
-    return data.length + 1;
+  private mapToMessage(msg: any): Message {
+    return {
+      id: msg.id,
+      conversation_id: msg.conversation_id,
+      sender_id: msg.sender_id,
+      sender_name: msg.sender_name,
+      content: msg.content,
+      type: msg.type,
+      created_at: msg.created_at,
+      read_at: msg.read_at,
+    };
   }
 }

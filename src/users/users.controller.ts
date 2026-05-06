@@ -26,14 +26,14 @@ export class UsersController {
     if (!valid) {
       return { success: false, message: 'Invalid credentials' };
     }
-    const { passwordHash, ...result } = user;
+    const { password_hash, ...result } = user;
     return { success: true, user: result };
   }
 
   @Get('users')
   async getAllUsers() {
     const users = await this.usersService.findAll();
-    return users.map(({ passwordHash, ...u }) => u);
+    return users.map(({ password_hash, ...u }) => u);
   }
 
   @Get('users/:id')
@@ -42,7 +42,7 @@ export class UsersController {
     if (!user) {
       return { success: false, message: 'User not found' };
     }
-    const { passwordHash, ...result } = user;
+    const { password_hash, ...result } = user;
     return { success: true, user: result };
   }
 }

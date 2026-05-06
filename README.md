@@ -1,15 +1,16 @@
 # MVChat API
 
-NestJS Backend for WhatsApp-like Chat Application with Google Sheets storage.
+NestJS Backend for WhatsApp-like Chat Application with Supabase storage.
 
 ## Tech Stack
 - NestJS 10.x + TypeScript
 - Pusher for real-time messaging (works on serverless/Vercel)
-- Google Sheets API for data storage
+- Supabase (PostgreSQL) for data storage
 - JWT Authentication
 
 ## Prerequisites
 - Node.js v22+
+- Supabase project (free tier works)
 
 ## Installation
 
@@ -26,9 +27,12 @@ Create `.env` file in project root:
 PORT=3001
 JWT_SECRET=mvchat-secret-key-change-in-production
 JWT_EXPIRES_IN=7d
-GOOGLE_SPREADSHEET_ID=10bLHBJ0rWQyaDv2uVwYmNVNxcBHX2tZw3B01RSkXrxc
 CLIENT_URL=http://localhost:3001
-GOOGLE_SERVICE_ACCOUNT_KEY={"type": "service_account","project_id": "xxx",...}
+
+# Supabase Configuration
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SUPABASE_ANON_KEY=your-anon-key
 
 # Pusher Configuration
 PUSHER_APP_ID=1403689
@@ -46,49 +50,43 @@ ONESIGNAL_API_KEY=your-onesignal-rest-api-key
 
 Note: Server runs on port 3001 (not 3000) to avoid conflicts.
 
-## Google Sheets Setup
+## Supabase Setup
 
-Your spreadsheet must have these sheets:
+### 1. Create Tables
 
-### 1. Users Sheet
-| Column | Header |
-|--------|--------|
-| A | id |
-| B | username |
-| C | email |
-| D | passwordHash |
-| E | avatarUrl |
-| F | createdAt |
-| G | playerId (OneSignal push notification ID) |
+Run the SQL migration in Supabase SQL Editor:
 
-### 2. Conversations Sheet
-| Column | Header |
-|--------|--------|
-| A | id |
-| B | name |
-| C | type |
-| D | createdAt |
+```bash
+# File: supabase/migrations/001_initial_schema.sql
+```
 
-### 3. ConversationMembers Sheet
-| Column | Header |
-|--------|--------|
-| A | conversation_id |
-| B | user_id |
-| C | role |
+This creates:
+- `users` table (with player_id for OneSignal)
+- `conversations` table (with last_message fields)
+- `conversation_members` table (many-to-many)
+- `messages` table (with read_at tracking)
+- Indexes for performance
+- Row Level Security policies
+- Realtime subscriptions enabled
 
-### 4. Messages Sheet
-| Column | Header |
-|--------|--------|
-| A | id |
-| B | conversationId |
-| C | senderId |
-| D | senderName |
-| E | content |
-| F | type |
-| G | createdAt |
-| H | readAt |
+### 2. Get Credentials
 
-**Important:** The Messages sheet includes senderName in column D.
+1. Go to [Supabase Dashboard](https://supabase.com/dashboard)
+2. Select your project
+3. Go to **Settings → API**
+4. Copy:
+   - `Project URL` → `SUPABASE_URL`
+   - `service_role` key → `SUPABASE_SERVICE_ROLE_KEY`
+   - `anon` key → `SUPABASE_ANON_KEY`
+
+### 3. Database Schema
+
+```
+users (id, username, email, password_hash, avatar_url, player_id, created_at)
+conversations (id, name, type, last_message, last_message_time, last_sender_id, last_sender_name, created_at)
+conversation_members (conversation_id, user_id, role)
+messages (id, conversation_id, sender_id, sender_name, content, type, created_at, read_at)
+```
 
 ## Run
 

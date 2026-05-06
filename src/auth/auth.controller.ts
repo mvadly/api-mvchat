@@ -4,8 +4,6 @@ import { UsersService } from '../users/users.service';
 import { CreateUserDto, LoginDto } from '../users/dto/users.dto';
 import { ConfigService } from '../config/config.service';
 import { OAuth2Client } from 'google-auth-library';
-import { User } from '../common/interfaces';
-import { GoogleSheetsService } from '../config';
 
 @Controller('auth')
 export class AuthController {
@@ -15,7 +13,6 @@ export class AuthController {
     private authService: AuthService,
     private usersService: UsersService,
     private configService: ConfigService,
-    private googleSheets: GoogleSheetsService,
   ) {
     this.oauth2Client = new OAuth2Client(
       this.configService.googleClientId,
@@ -41,7 +38,7 @@ export class AuthController {
     }
     console.log({ user });
     const valid = await this.usersService.verifyPassword(user, dto.password);
-    console.log(`Hash: ${user.passwordHash}, Plain: ${dto.password}, Valid: ${valid}`);
+    console.log(`Hash: ${user.password_hash}, Plain: ${dto.password}, Valid: ${valid}`);
     if (!valid) {
       return { success: false, message: 'Invalid credentials, Password is incorrect' };
     }
@@ -73,26 +70,21 @@ export class AuthController {
       const name: string = payload.name || email.split('@')[0];
 
       // Check if user exists, create if not
-      let user: User | null = await this.usersService.findByEmail(email);
-      let userWithoutPassword: Omit<User, 'passwordHash'> | null = null;
+      let user = await this.usersService.findByEmail(email);
       
       if (!user) {
         // Create new user with Google-generated password
         const randomPassword = 'google_' + Math.random().toString(36).substring(2);
         const result = await this.authService.register(name, email, randomPassword);
-        userWithoutPassword = result.user;
-        // Need to get full user for login, use registered email
         user = await this.usersService.findByEmail(email);
-      } else {
-        const { passwordHash, ...uwps } = user;
-        userWithoutPassword = uwps;
       }
 
-      if (!userWithoutPassword || !user) {
+      if (!user) {
         return { success: false, message: 'User creation failed' };
       }
 
       // Generate JWT
+      const { password_hash, ...userWithoutPassword } = user;
       const auth = await this.authService.login(user);
       return { success: true, ...auth, user: userWithoutPassword };
     } catch (error) {
@@ -110,16 +102,8 @@ export class AuthController {
         return { success: false, message: 'userId and playerId are required' };
       }
 
-      const data = await this.googleSheets.getValues('Users');
-      for (let i = 1; i < data.length; i++) {
-        if (data[i].length >= 1 && data[i][0] === userId) {
-          const row = i + 1;
-          await this.googleSheets.updateValues(`Users!G${row}`, [[playerId]]);
-          return { success: true, message: 'Token updated' };
-        }
-      }
-
-      return { success: false, message: 'User not found' };
+      await this.usersService.updatePlayerId(userId, playerId);
+      return { success: true, message: 'Token updated' };
     } catch (error) {
       console.error('Update token error:', error);
       return { success: false, message: 'Failed to update token' };

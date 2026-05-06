@@ -1,75 +1,46 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GoogleSheetsService } from '../config';
-import { User, CreateUserDto } from '../common/interfaces';
+import { SupabaseService, User } from '../config';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
   private readonly SALT_ROUNDS = 10;
-  private readonly USERS_SHEET = 'Users';
 
-  constructor(private googleSheets: GoogleSheetsService) {}
+  constructor(private supabase: SupabaseService) {}
 
   async findAll(): Promise<User[]> {
-    const data = await this.googleSheets.getValues(this.USERS_SHEET);
-    console.log('Fetched users data:', data);
-    if (!data.length) return [];
-
-    const headers = data[0].map((h: string) => h.toLowerCase());
-    const users: User[] = [];
-
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      if (row.length < 5) continue;
-      
-      const user: any = { id: row[headers.indexOf('id')] || '' };
-      user.username = row[headers.indexOf('username')] || '';
-      user.email = row[headers.indexOf('email')] || '';
-      user.passwordHash = row[headers.indexOf('password')] || '';
-      user.avatarUrl = row[headers.indexOf('avatar_url')] || '';
-      user.createdAt = row[headers.indexOf('created_at')] || '';
-      user.playerId = row[headers.indexOf('player_id')] || row[6] || '';
-      
-      if (user.id) users.push(user as User);
-    }
-
+    const users = await this.supabase.findAllUsers();
+    this.logger.log(`Fetched ${users.length} users`);
     return users;
   }
 
   async findByEmail(email: string): Promise<User | null> {
-    const users = await this.findAll();
-    return users.find(u => u.email === email) || null;
+    return this.supabase.findUserByEmail(email);
   }
 
   async findById(id: string): Promise<User | null> {
-    const users = await this.findAll();
-    return users.find(u => u.id === id) || null;
+    return this.supabase.findUserById(id);
   }
 
-  async create(dto: CreateUserDto): Promise<User> {
-    const id = this.generateId();
+  async create(dto: { username: string; email: string; password: string }): Promise<User> {
     const passwordHash = await bcrypt.hash(dto.password, this.SALT_ROUNDS);
-    const createdAt = new Date().toISOString();
-
-    const newUser = [id, dto.username, dto.email, passwordHash, '', createdAt];
-    await this.googleSheets.appendValues(`${this.USERS_SHEET}!A${(await this.getNextRow())}:F`, [newUser]);
+    const user = await this.supabase.createUser({
+      username: dto.username,
+      email: dto.email,
+      password_hash: passwordHash,
+    });
 
     this.logger.log(`User created: ${dto.email}`);
-    return { id, username: dto.username, email: dto.email, passwordHash, createdAt };
+    return user;
   }
 
   async verifyPassword(user: User, password: string): Promise<boolean> {
-    return bcrypt.compare(password, user.passwordHash);
+    return bcrypt.compare(password, user.password_hash);
   }
 
-  private generateId(): string {
-    return 'usr_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
-  }
-
-  private async getNextRow(): Promise<number> {
-    const data = await this.googleSheets.getValues(this.USERS_SHEET);
-    this.logger.log(`Users sheet row count: ${data.length}`);
-    return data.length + 1;
+  async updatePlayerId(userId: string, playerId: string): Promise<void> {
+    await this.supabase.updateUserPlayerId(userId, playerId);
+    this.logger.log(`Player ID updated for user: ${userId}`);
   }
 }

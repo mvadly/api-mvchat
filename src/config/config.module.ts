@@ -2,7 +2,7 @@ import { Module, Global } from '@nestjs/common';
 import { ConfigModule as NestConfigModule } from '@nestjs/config';
 import { join } from 'path';
 import { ConfigService } from './config.service';
-import { GoogleSheetsService } from './google-sheets.service';
+import { SupabaseService } from './supabase.service';
 
 @Global()
 @Module({
@@ -12,7 +12,7 @@ import { GoogleSheetsService } from './google-sheets.service';
       isGlobal: true,
     }),
   ],
-  providers: [ConfigService, GoogleSheetsService],
-  exports: [ConfigService, GoogleSheetsService],
+  providers: [ConfigService, SupabaseService],
+  exports: [ConfigService, SupabaseService],
 })
 export class ConfigModule {}

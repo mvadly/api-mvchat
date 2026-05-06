@@ -14,24 +14,24 @@ export class AuthService {
     private configService: ConfigService,
   ) {}
 
-  async validateUser(email: string, password: string): Promise<Omit<User, 'passwordHash'> | null> {
+  async validateUser(email: string, password: string): Promise<Omit<User, 'password_hash'> | null> {
     const user = await this.usersService.findByEmail(email);
     if (!user) return null;
     
     const valid = await this.usersService.verifyPassword(user, password);
     if (!valid) return null;
     
-    const { passwordHash, ...result } = user;
+    const { password_hash, ...result } = user;
     return result;
   }
 
-  async generateToken(user: Omit<User, 'passwordHash'>): Promise<string> {
+  async generateToken(user: Omit<User, 'password_hash'>): Promise<string> {
     const payload = { sub: user.id, username: user.username, email: user.email };
     return this.jwtService.sign(payload);
   }
 
   async login(user: User): Promise<AuthResponse> {
-    const { passwordHash, ...userWithoutPassword } = user;
+    const { password_hash, ...userWithoutPassword } = user;
     const accessToken = await this.generateToken(userWithoutPassword);
     return { accessToken, user: userWithoutPassword };
   }

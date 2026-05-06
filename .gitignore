@@ -3,3 +3,5 @@ credentials.json
 server.log
 node_modules/
 dist/
+migrate.js
+*.sql

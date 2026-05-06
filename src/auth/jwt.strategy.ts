@@ -22,7 +22,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user) {
       throw new UnauthorizedException();
     }
-    const { passwordHash, ...result } = user;
+    const { password_hash, ...result } = user;
     return result;
   }
 }

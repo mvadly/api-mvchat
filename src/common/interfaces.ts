@@ -2,10 +2,10 @@ export interface User {
   id: string;
   username: string;
   email: string;
-  passwordHash: string;
-  avatarUrl?: string;
-  createdAt: string;
-  playerId?: string;
+  password_hash: string;
+  avatar_url?: string;
+  created_at: string;
+  player_id?: string;
 }
 
 export interface CreateUserDto {
@@ -21,33 +21,33 @@ export interface LoginDto {
 
 export interface AuthResponse {
   accessToken: string;
-  user: Omit<User, 'passwordHash'>;
+  user: Omit<User, 'password_hash'>;
 }
 
 export interface Conversation {
   id: string;
   name: string;
   type: 'direct' | 'group';
-  createdAt: string;
-  lastMessage?: string;
-  lastMessageTime?: string;
-  lastSenderId?: string;
-  lastSenderName?: string;
+  created_at: string;
+  last_message?: string;
+  last_message_time?: string;
+  last_sender_id?: string;
+  last_sender_name?: string;
 }
 
 export interface ConversationMember {
-  conversationId: string;
-  userId: string;
+  conversation_id: string;
+  user_id: string;
   role: 'admin' | 'member';
 }
 
 export interface Message {
   id: string;
-  conversationId: string;
-  senderId: string;
-  senderName: string;
+  conversation_id: string;
+  sender_id: string;
+  sender_name: string;
   content: string;
   type: 'text' | 'image';
-  createdAt: string;
-  readAt?: string;
+  created_at: string;
+  read_at?: string;
 }
