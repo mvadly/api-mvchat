@@ -16,8 +16,9 @@ export class MessagesService {
     private usersService: UsersService,
   ) {}
 
-  async findByConversation(conversationId: string): Promise<Message[]> {
-    return this.supabase.findMessagesByConversation(conversationId);
+  async findByConversation(conversationId: string): Promise<any[]> {
+    const messages = await this.supabase.findMessagesByConversation(conversationId);
+    return messages.map(this.toCamelCase);
   }
 
   async createMessage(
@@ -26,7 +27,7 @@ export class MessagesService {
     senderName: string,
     content: string,
     type: 'text' | 'image' = 'text'
-  ): Promise<Message> {
+  ): Promise<any> {
     const message = await this.supabase.createMessage({
       conversation_id: conversationId,
       sender_id: senderId,
@@ -78,7 +79,7 @@ export class MessagesService {
     );
 
     this.logger.log(`Message created: ${message.id}`);
-    return this.mapToMessage(message);
+    return this.toCamelCase(message);
   }
 
   async create(
@@ -149,7 +150,7 @@ export class MessagesService {
     );
 
     this.logger.log(`Message upserted: ${upserted.id}`);
-    return this.mapToMessage(upserted);
+    return this.toCamelCase(upserted);
   }
 
   private async sendPushNotification(
@@ -198,6 +199,19 @@ export class MessagesService {
       type: msg.type,
       created_at: msg.created_at,
       read_at: msg.read_at,
+    };
+  }
+
+  private toCamelCase(msg: any): any {
+    return {
+      id: msg.id,
+      conversationId: msg.conversation_id,
+      senderId: msg.sender_id,
+      senderName: msg.sender_name,
+      content: msg.content,
+      type: msg.type,
+      createdAt: msg.created_at,
+      readAt: msg.read_at,
     };
   }
 }

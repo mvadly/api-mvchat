@@ -7,6 +7,7 @@ NestJS Backend for WhatsApp-like Chat Application with Supabase storage.
 - Pusher for real-time messaging (works on serverless/Vercel)
 - Supabase (PostgreSQL) for data storage
 - JWT Authentication
+- OneSignal for push notifications
 
 ## Prerequisites
 - Node.js v22+
@@ -15,7 +16,7 @@ NestJS Backend for WhatsApp-like Chat Application with Supabase storage.
 ## Installation
 
 ```bash
-cd /mnt/d/Projects/Nestjs/api-mvchat
+cd api-mvchat
 npm install
 ```
 
@@ -35,9 +36,9 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 SUPABASE_ANON_KEY=your-anon-key
 
 # Pusher Configuration
-PUSHER_APP_ID=1403689
-PUSHER_KEY=67678fab751961ef6d68
-PUSHER_SECRET=dd87d1976ef3266e7cd2
+PUSHER_APP_ID=your-app-id
+PUSHER_KEY=your-key
+PUSHER_SECRET=your-secret
 PUSHER_CLUSTER=ap1
 
 # Google OAuth (for Google Sign-In)
@@ -52,13 +53,9 @@ Note: Server runs on port 3001 (not 3000) to avoid conflicts.
 
 ## Supabase Setup
 
-### 1. Create Tables
+### 1. Run Migration
 
-Run the SQL migration in Supabase SQL Editor:
-
-```bash
-# File: supabase/migrations/001_initial_schema.sql
-```
+Go to [Supabase SQL Editor](https://app.supabase.com/dashboard) and run the SQL from `supabase/migrations/001_initial_schema.sql`.
 
 This creates:
 - `users` table (with player_id for OneSignal)
@@ -109,6 +106,7 @@ Server runs on http://localhost:3001
 | POST | /auth/register | Register new user |
 | POST | /auth/login | Login with email/password |
 | POST | /auth/google | Login with Google (OAuth) |
+| POST | /auth/update-token | Update OneSignal player ID |
 | GET | /auth/users | Get all users |
 | GET | /auth/users/:id | Get user by ID |
 
@@ -126,12 +124,10 @@ Server runs on http://localhost:3001
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | /messages/conversation/:conversationId | Get messages by conversation |
-| POST | /messages | Create message (saves to Google Sheets + triggers Pusher) |
+| POST | /messages | Create message |
 | POST | /messages/upsert | Insert or update message (idempotent) |
 
 ## Message Flow Architecture
-
-This backend uses Pusher for real-time messaging, which works on serverless platforms like Vercel.
 
 ### Authentication Flow
 
@@ -140,14 +136,14 @@ sequenceDiagram
     participant F as Flutter Client
     participant A as AuthController
     participant U as UsersService
-    participant S as Google Sheets
+    participant S as Supabase
     participant G as Google OAuth
 
     alt Email/Password
         F->>A: POST /auth/register
         A->>S: Check if email exists
         A->>U: Create user (bcrypt hash)
-        U->>S: Append to Users sheet
+        U->>S: Insert into users table
         A->>A: Generate JWT token
         A->>F: Return { token, user }
         F->>A: POST /auth/login
@@ -171,16 +167,16 @@ sequenceDiagram
 sequenceDiagram
     participant F as Flutter Client
     participant M as MessagesService
-    participant S as Google Sheets
+    participant S as Supabase
     participant C as ConversationsService
     participant P as Pusher
     participant O as PushService
     participant R as Receiver
 
     F->>M: POST /messages
-    M->>S: Save to Messages sheet
-    M->>C: Update lastMessage
-    C->>S: Update Conversations sheet
+    M->>S: Save to messages table
+    M->>C: Update last_message
+    C->>S: Update conversations table
     M->>P: Trigger newMessage event
     P->>R: Real-time notification
     M->>O: Send push notification
@@ -194,12 +190,12 @@ sequenceDiagram
 sequenceDiagram
     participant F as Flutter Client
     participant B as Backend API
-    participant S as Google Sheets
+    participant S as Supabase
     participant P as Pusher
     participant Poll as Polling (30s)
 
     F->>B: POST /messages
-    B->>S: Save to Sheets
+    B->>S: Save to database
     B->>P: Trigger event
 
     alt Pusher Success
@@ -219,17 +215,17 @@ sequenceDiagram
 sequenceDiagram
     participant F as Flutter App
     participant B as Backend API
-    participant S as Google Sheets
+    participant S as Supabase
     participant O as OneSignal API
     participant D as Device
 
     F->>B: POST /auth/update-token
-    B->>S: Store playerId in Users sheet
+    B->>S: Store player_id in users table
 
     note over F,D: Receiver app in background/closed
 
     B->>B: Message received for User B
-    B->>S: Get User B's playerId
+    B->>S: Get User B's player_id
     B->>O: POST /notifications
     O->>D: Push notification delivered
     D->>D: Show on lock screen
@@ -241,25 +237,25 @@ sequenceDiagram
 
 ```mermaid
 graph TD
-    GS[Google Sheets]
+    DB[(Supabase PostgreSQL)]
     
-    GS --> U[Users Sheet]
-    GS --> C[Conversations Sheet]
-    GS --> CM[ConversationMembers Sheet]
-    GS --> M[Messages Sheet]
+    DB --> U[users table]
+    DB --> C[conversations table]
+    DB --> CM[conversation_members table]
+    DB --> M[messages table]
     
-    U --> U1[id, username, email, passwordHash]
-    U --> U2[avatarUrl, createdAt, playerId]
+    U --> U1[id, username, email, password_hash]
+    U --> U2[avatar_url, created_at, player_id]
     
-    C --> C1[id, name, type, createdAt]
-    C --> C2[lastMessage, lastMessageTime]
-    C --> C3[lastSenderId, lastSenderName]
+    C --> C1[id, name, type, created_at]
+    C --> C2[last_message, last_message_time]
+    C --> C3[last_sender_id, last_sender_name]
     
-    CM --> CM1[conversationId, userId, role]
+    CM --> CM1[conversation_id, user_id, role]
     
-    M --> M1[id, conversationId, senderId]
-    M --> M2[senderName, content, type]
-    M --> M3[createdAt, readAt]
+    M --> M1[id, conversation_id, sender_id]
+    M --> M2[sender_name, content, type]
+    M --> M3[created_at, read_at]
 ```
 
 ### Why This Architecture?
@@ -268,27 +264,28 @@ graph TD
 - Polling as backup ensures no missed messages
 - OneSignal push notifications work when app is closed
 - Prevents duplicate messages via upsert logic
+- Supabase provides relational data with real-time CDC
 
 ## Pusher Integration
 
-The backend triggers a Pusher event after saving each message to Google Sheets:
+The backend triggers a Pusher event after saving each message:
 
 ```javascript
 // Trigger Pusher after saving
 await pusherServer.trigger('chat', 'newMessage', {
   id: message.id,
-  conversationId: message.conversationId,
-  senderId: message.senderId,
-  senderName: message.senderName,
+  conversation_id: message.conversation_id,
+  sender_id: message.sender_id,
+  sender_name: message.sender_name,
   content: message.content,
   type: message.type,
-  createdAt: message.createdAt,
+  created_at: message.created_at,
 });
 ```
 
 ### Pusher Channel
 - Channel: `chat` (general) and `chat-{conversationId}` (per conversation)
-- Event: `newMessage`
+- Event: `newMessage`, `conversationUpdate`
 
 ## Example Usage
 
@@ -311,21 +308,21 @@ curl -X POST http://localhost:3001/auth/login \
 curl -X POST http://localhost:3001/messages \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <TOKEN>" \
-  -d '{"conversationId":"conv_xxx","senderId":"usr_xxx","content":"Hello!"}'
+  -d '{"conversation_id":"conv-xxx","sender_id":"usr-xxx","content":"Hello!"}'
 ```
 
 ### Get Messages
 ```bash
-curl -X GET http://localhost:3001/messages/conversation/conv_xxx \
+curl -X GET http://localhost:3001/messages/conversation/conv-xxx \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
 ## Troubleshooting
 
-### Google Sheets error
-1. Verify service account has access to spreadsheet
-2. Check GOOGLE_SERVICE_ACCOUNT_KEY is valid JSON
-3. Ensure spreadsheet ID is correct
+### Supabase connection failed
+1. Verify SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env
+2. Check migration SQL was run successfully in Supabase dashboard
+3. Ensure tables exist: users, conversations, conversation_members, messages
 
 ### Port already in use
 ```bash
@@ -337,8 +334,8 @@ PORT=3002
 ```
 
 ### Messages not showing
-- Check Messages sheet has correct headers (8 columns including senderName)
-- Verify column D header is "senderName"
+- Check Supabase messages table has correct schema
+- Run SQL migration if tables are missing
 - Check console for error logs by running `npm run start:dev`
 
 ### Pusher not working
@@ -350,7 +347,7 @@ PORT=3002
 - Check OneSignal credentials in .env
 - Verify app has internet permission
 - Check OneSignal dashboard for notification delivery status
-- Ensure playerId is saved to Users sheet (column G)
+- Ensure player_id is saved in users table
 
 ## Push Notifications
 
@@ -359,8 +356,8 @@ The app uses OneSignal for push notifications when users receive messages while 
 ### How It Works
 
 ```
-1. User opens app → OneSignal SDK registers device → playerId sent to backend
-2. Backend stores playerId in Users sheet (column G)
+1. User opens app → OneSignal SDK registers device → player_id sent to backend
+2. Backend stores player_id in users table
 3. When message saved → Backend calls OneSignal API → Receiver gets notification
 4. Notification shows: "ConversationName: Sender: message preview"
 ```
@@ -379,32 +376,35 @@ api-mvchat/
 ├── src/
 │   ├── main.ts                 # Entry point
 │   ├── app.module.ts           # Root module
-│   ├── config/               # Configuration
+│   ├── config/                 # Configuration
 │   │   ├── config.module.ts
 │   │   ├── config.service.ts
-│   │   ├── google-sheets.service.ts
-│   │   ├── pusher.config.ts   # Pusher server configuration
-│   │   └── push.service.ts    # OneSignal push notification service
-│   ├── auth/                 # Authentication
+│   │   ├── supabase.service.ts    # Supabase CRUD operations
+│   │   ├── pusher.config.ts    # Pusher server configuration
+│   │   └── push.service.ts     # OneSignal push notification service
+│   ├── auth/                   # Authentication
 │   │   ├── auth.module.ts
 │   │   ├── auth.service.ts
 │   │   ├── auth.controller.ts
 │   │   └── jwt.strategy.ts
-│   ├── users/               # User management
+│   ├── users/                  # User management
 │   │   ├── users.module.ts
 │   │   ├── users.service.ts
 │   │   └── users.controller.ts
-│   ├── conversations/        # Chat rooms
+│   ├── conversations/          # Chat rooms
 │   │   ├── conversations.module.ts
 │   │   ├── conversations.service.ts
 │   │   └── conversations.controller.ts
-│   ├── messages/           # Messages
+│   ├── messages/               # Messages
 │   │   ├── messages.module.ts
 │   │   ├── messages.service.ts
 │   │   └── messages.controller.ts
-│   └── common/             # Shared
+│   └── common/                 # Shared
 │       └── interfaces.ts
-├── .env                   # Environment variables
+├── supabase/
+│   └── migrations/
+│       └── 001_initial_schema.sql  # Database schema
+├── .env                        # Environment variables
 ├── package.json
 ├── tsconfig.json
 └── nest-cli.json

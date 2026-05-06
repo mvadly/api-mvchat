@@ -12,11 +12,11 @@ export class MessagesController {
   }
 
   @Post()
-  async create(@Body() body: { conversation_id: string; sender_id: string; sender_name?: string; content: string; type?: 'text' | 'image' }) {
+  async create(@Body() body: { conversationId?: string; conversation_id?: string; senderId?: string; sender_id?: string; senderName?: string; sender_name?: string; content: string; type?: 'text' | 'image' }) {
     return this.messagesService.createMessage(
-      body.conversation_id,
-      body.sender_id,
-      body.sender_name || 'Unknown Sender',
+      body.conversationId || body.conversation_id || '',
+      body.senderId || body.sender_id || '',
+      body.senderName || body.sender_name || 'Unknown Sender',
       body.content,
       body.type || 'text',
     );
