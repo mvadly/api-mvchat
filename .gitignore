@@ -1,6 +1,9 @@
 .env
 credentials.json
 server.log
+backend.log
+backend.err
+*.txt
 node_modules/
 dist/
 migrate.js

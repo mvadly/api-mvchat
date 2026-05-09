@@ -237,7 +237,12 @@ export class SupabaseService implements OnModuleInit {
       }
     }
 
-    return this.createConversation(`dm_${userId1}_${userId2}`, 'direct', [userId1, userId2]);
+    const [user1, user2] = await Promise.all([
+      this.findUserById(userId1),
+      this.findUserById(userId2),
+    ]);
+    const name = `${user1?.username || 'Unknown'} & ${user2?.username || 'Unknown'}`;
+    return this.createConversation(name, 'direct', [userId1, userId2]);
   }
 
   async getConversationMembers(conversationId: string): Promise<string[]> {

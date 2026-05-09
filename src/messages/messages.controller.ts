@@ -23,7 +23,17 @@ export class MessagesController {
   }
 
   @Post('upsert')
-  async upsert(@Body() body: Message) {
-    return this.messagesService.upsertMessage(body);
+  async upsert(@Body() body: any) {
+    const mapped: Message = {
+      id: body.id,
+      conversation_id: body.conversationId || body.conversation_id || '',
+      sender_id: body.senderId || body.sender_id || '',
+      sender_name: body.senderName || body.sender_name || 'Unknown Sender',
+      content: body.content,
+      type: body.type || 'text',
+      created_at: body.createdAt || body.created_at || new Date().toISOString(),
+      read_at: body.readAt || body.read_at,
+    };
+    return this.messagesService.upsertMessage(mapped);
   }
 }
