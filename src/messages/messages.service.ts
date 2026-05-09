@@ -116,31 +116,6 @@ export class MessagesService {
       upserted.sender_name,
     );
 
-    // Trigger Pusher notifications
-    try {
-      await pusherServer.trigger('chat', 'newMessage', {
-        id: upserted.id,
-        conversation_id: upserted.conversation_id,
-        sender_id: upserted.sender_id,
-        sender_name: upserted.sender_name,
-        content: upserted.content,
-        type: upserted.type,
-        created_at: upserted.created_at,
-      });
-
-      await pusherServer.trigger('chat', 'conversationUpdate', {
-        conversation_id: upserted.conversation_id,
-        last_message: upserted.content,
-        last_message_time: upserted.created_at,
-        last_sender_id: upserted.sender_id,
-        last_sender_name: upserted.sender_name,
-      });
-
-      this.logger.log(`Pusher triggered for message: ${upserted.id}`);
-    } catch (pusherError) {
-      this.logger.error(`Pusher trigger error: ${pusherError}`);
-    }
-
     // Send push notification
     this.sendPushNotification(
       upserted.conversation_id,
